@@ -85,6 +85,11 @@ class Functional(object):
         pmin = pop.prange.min()
         zmin = pmin*Rmin**2
         zmax = pmax*Rmax**2
+        # are any of these values constant?
+        aconst = amin == amax
+        econst = emin == emax
+        Rconst = Rmin == Rmax
+        pconst = pmin == pmax
         # conversion factor for R values to a,r values
         x = pop.Rrange.unit.to(pop.arange.unit)
         # Lambert phase function
@@ -94,6 +99,7 @@ class Functional(object):
         # check for defaults and replace if set to None
         if dmagmin is None:
             dmagmin = -2.5*np.log10(pmax*(Rmax*x)**2/rmin**2)
+            print 'dmagmin: %r' % dmagmin
         if dmagmax is None:
             dmagmax = -2.5*np.log10(pmin*(Rmin*x)**2/rmax**2*PhiL(np.pi - np.arcsin(0.0001/rmax)))
         # probability density functions
@@ -111,10 +117,7 @@ class Functional(object):
         b2 = np.linspace(bstar, np.pi, num=50*n)
         b2val = np.sin(b2)**2*PhiL(b2)
         binv2 = interpolate.InterpolatedUnivariateSpline(b2val[::-1], b2[::-1], k=3, ext=1)
-        # get pdf of r
-        pdfs = (f_e, f_a)
-        ranges = (amin, amax, emin, emax)
-        print 'finding pdf of r'
+        # if pp is loaded, set up jobserver
         if ppLoad:
             # set up job server for parallel computations to get f_r
             ppservers = ()
@@ -124,16 +127,47 @@ class Functional(object):
                 job_server = pp.Server(ncpus, ppservers=ppservers)
             else:
                 job_server = pp.Server(ppservers=ppservers)
-
-            jobs = [(job_server.submit(onef_r, (ri, pdfs, ranges), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
-            pdfr = np.array([])
-            for job in jobs:
-                pdfr = np.hstack((pdfr, job()))            
+        # get pdf of r
+        pdfr = np.array([])
+        if aconst and econst:
+            if ppLoad:
+                jobs = [(job_server.submit(onef_r_aeconst, (ri, amin, emin), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
+                for job in jobs:
+                    pdfr = np.hstack((pdfr, job()))
+            else:
+                for ri in r:
+                    temp = onef_r_aeconst(ri, amin, emin)
+                    pdfr = np.append(pdfr, temp)
+        elif aconst:
+            if ppLoad:
+                jobs = [(job_server.submit(onef_r_aconst, (ri, amin, pop.erange, f_e), (), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
+                for job in jobs:
+                    pdfr = np.hstack((pdfr, job()))
+            else:                
+                for ri in r:
+                    temp = onef_r_aconst(ri, amin, pop.erange, f_e)
+                    pdfr = np.append(pdfr, temp)
+        elif econst:
+            if ppLoad:
+                jobs = [(job_server.submit(onef_r_econst, (ri, emin, pop.arange.to('AU').value, f_a), (), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
+                for job in jobs:
+                    pdfr = np.hstack((pdfr, job()))
+            else:
+                for ri in r:
+                    temp = onef_r_econst(ri, emin, pop.arange.to('AU').value, f_a)
+                    pdfr = np.append(pdfr, temp)
         else:
-            pdfr = np.array([])
-            for ri in r:
-                temp = onef_r(ri,pdfs,ranges)
-                pdfr = np.append(pdfr,temp)
+            pdfs = (f_e, f_a)
+            ranges = (amin, amax, emin, emax)
+            print 'finding pdf of r'
+            if ppLoad:
+                jobs = [(job_server.submit(onef_r, (ri, pdfs, ranges), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
+                for job in jobs:
+                    pdfr = np.hstack((pdfr, job()))            
+            else:
+                for ri in r:
+                    temp = onef_r(ri,pdfs,ranges)
+                    pdfr = np.append(pdfr,temp)
         # pdf of r
         f_r = interpolate.InterpolatedUnivariateSpline(r, pdfr, k=3, ext=1)
         # get pdf of zeta
@@ -298,7 +332,7 @@ def onef_r(ri, pdfs, ranges):
     
     Args:
         ri (float):
-            Value of orbital radius
+            Value of orbital radius (AU)
         pdfs (tuple):
             Probability density functions for eccentricity and semi-major axis  
         ranges (tuple):
@@ -348,6 +382,94 @@ def onef_r(ri, pdfs, ranges):
             grand[i] = granda
         f = np.dot(z,grand)
     
+    return f
+    
+def onef_r_aeconst(r, a, e):
+    """Returns probability density of orbital radius r for constant semi-major
+    axis and eccentricity
+    
+    Args:
+        r (float):
+            Value of orbital radius (AU)
+        a (float):
+            Value of semi-major axis (AU)
+        e (float):
+            Value of eccentricity
+            
+    Returns:
+        f (float):
+            Probability density of orbital radius
+    
+    """
+    
+    if ((a*e)**2 - (a - r)**2) <= 0:
+        f = 0.
+    else:
+        f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))
+        
+    return f
+    
+def onef_r_aconst(r, a, e, f_e):
+    """Returns probability density of orbital radius r for constant semi-major
+    axis and random eccentricity
+    
+    Args:
+        r (float):
+            Value of orbital radius (AU)
+        a (float):
+            Value of semi-major axis (AU)
+        e (ndarray):
+            Array containing minimum and maximum eccentricity
+        f_e (callable(e)):
+            Probability density function for eccentricity
+            
+    Returns:
+        f (float):
+            Probability density of orbital radius
+    
+    """
+    
+    emin = np.abs(1. - r/a) + 1e-6
+    if emin > e.max():
+        f = 0.
+    else:
+        grand = lambda ei: r/(np.pi*a*np.sqrt((a*ei)**2 - (a-r)**2))*f_e(ei)
+        f = integrate.quad(grand, emin, e.max(), limit=100)[0]
+        
+    return f
+    
+def onef_r_econst(r, e, a, f_a):
+    """Returns probability density of orbital radius r for random semi-major
+    axis and constant eccentricity
+    
+    Args:
+        r (float):
+            Value of orbital radius (AU)
+        e (float):
+            Value of eccentricity
+        a (ndarray):
+            Array containing minimum and maximum semi-major axis (AU)
+        f_a (callable(a)):
+            Probability density function for semi-major axis
+            
+    Returns:
+        f (float):
+            Probability density of orbital radius
+    
+    """
+    
+    if (r == a.min()*(1.-e)) or (r == a.max()*(1.+e)):
+        f = 0.
+    else:
+        amax = r/(1.-e)
+        amin = r/(1.+e)
+        if amax > a.max():
+            amax = a.max()
+        if amin < a.min():
+            amin = a.min()
+        grand = lambda ai: r/(np.pi*ai*np.sqrt((ai*e)**2 - (ai-r)**2))*f_a(ai)
+        f = integrate.quad(grand, amin, amax, limit=500)[0]
+        
     return f
     
 def onef_dmags(dmag, s, ranges, val, pdfs, funcs, x):
