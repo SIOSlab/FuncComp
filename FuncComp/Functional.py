@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-v1: Created on May 31, 2016
+Updated on June 8, 2016
 author: Daniel Garrett (dg622@cornell.edu)
 """
 
@@ -14,7 +14,6 @@ try:
     ppLoad = True
 except ImportError:
     ppLoad = False
-
 import FuncComp.Population as Population
 import FuncComp.util as util
 
@@ -99,7 +98,6 @@ class Functional(object):
         # check for defaults and replace if set to None
         if dmagmin is None:
             dmagmin = -2.5*np.log10(pmax*(Rmax*x)**2/rmin**2)
-            print 'dmagmin: %r' % dmagmin
         if dmagmax is None:
             dmagmax = -2.5*np.log10(pmin*(Rmin*x)**2/rmax**2*PhiL(np.pi - np.arcsin(0.0001/rmax)))
         # probability density functions
@@ -107,9 +105,8 @@ class Functional(object):
         f_p = pop.albedo
         f_e = pop.eccentricity
         f_a = pop.semi_axis
-        # linearly spaced arrays for range values
+        # linearly spaced array for range values
         r = np.linspace(rmin, rmax, num=n)
-        z = np.linspace(zmin, zmax, num=n)
         # inverse 1 (<bstar) of sin(b)^2*Phi(b)
         b1 = np.linspace(0., bstar, num=50*n)
         binv1 = interpolate.InterpolatedUnivariateSpline(np.sin(b1)**2*PhiL(b1), b1, k=3, ext=1)
@@ -119,7 +116,6 @@ class Functional(object):
         binv2 = interpolate.InterpolatedUnivariateSpline(b2val[::-1], b2[::-1], k=3, ext=1)
         # if pp is loaded, set up jobserver
         if ppLoad:
-            # set up job server for parallel computations to get f_r
             ppservers = ()
             if len(sys.argv) > 1:
                 ncpus = int(sys.argv[1])
@@ -128,6 +124,7 @@ class Functional(object):
             else:
                 job_server = pp.Server(ppservers=ppservers)
         # get pdf of r
+        print 'finding pdf of r'
         pdfr = np.array([])
         if aconst and econst:
             if ppLoad:
@@ -159,7 +156,6 @@ class Functional(object):
         else:
             pdfs = (f_e, f_a)
             ranges = (amin, amax, emin, emax)
-            print 'finding pdf of r'
             if ppLoad:
                 jobs = [(job_server.submit(onef_r, (ri, pdfs, ranges), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
                 for job in jobs:
@@ -170,53 +166,71 @@ class Functional(object):
                     pdfr = np.append(pdfr,temp)
         # pdf of r
         f_r = interpolate.InterpolatedUnivariateSpline(r, pdfr, k=3, ext=1)
-        # get pdf of zeta
-        pdfs = (f_p, f_R)
-        ranges = (pmin, pmax, Rmin, Rmax)
+        # get pdf of zeta = p*R^2
         print 'finding pdf of p*R^2'
-        if ppLoad:
-            jobs = [(job_server.submit(onef_zeta, (zetai, pdfs, ranges), (onef_R2,), ('FuncComp.Functional', 'numpy as np'))) for zetai in z]
-            pdfz = np.array([])
-            for job in jobs:
-                pdfz = np.hstack((pdfz, job()))
-        else:
-            pdfz = np.array([])
-            for zetai in z:
-                temp = onef_zeta(zetai, pdfs, ranges)
-                pdfz = np.append(pdfz,temp)
-        # pdf of zeta = p*R^2
-        f_z = interpolate.InterpolatedUnivariateSpline(z, pdfz, k=3, ext=1)
+        ranges = (pmin, pmax, Rmin, Rmax)
+        pdfs = (f_p, f_R)
+        pdfz = f_zeta(ranges, pdfs, n)
         # get joint pdf of s, dmag
+        print 'finding joint pdf of s, dmag'
         # check for defaults and replace if set to None
         if smax is None:
             self.s = np.linspace(smin,rmax,num=ns)
         else:
             self.s = np.linspace(smin,smax,num=ns)
         self.dmag = np.linspace(dmagmin,dmagmax,num=ndmag)
-        ranges = (pmin, pmax, Rmin, Rmax, rmin, rmax, zmin, zmax)
+        self.pc = np.zeros((len(self.dmag),len(self.s)))
         val = np.sin(bstar)**2*PhiL(bstar)
+        if pconst and Rconst:
+            f_z = pdfz.pRconst
+        elif pconst:
+            f_z = pdfz.pconst
+        elif Rconst:
+            f_z = pdfz.Rconst
+        else:
+            f_z = pdfz.f_z
         pdfs = (f_z, f_r)
         funcs = (binv1, binv2)
-        self.pc = np.zeros((len(self.dmag),len(self.s)))
-        print 'finding joint pdf of s, dmag'
-        if ppLoad:
-            for i in xrange(len(self.s)):
-                print 'Progress: %r / %r' % (i+1, len(self.s))
-                if self.s[i] == 0.:
-                    self.pc[:,i] = np.zeros((len(self.dmag),))
-                else:
-                    jobs = [(job_server.submit(onef_dmags, (self.dmag[j], self.s[i], ranges, val, pdfs, funcs, x), (onef_dmagsz, Jac, util.mindmag, util.maxdmag), ('FuncComp.Functional', 'FuncComp.util as util', 'numpy as np', 'scipy.integrate as integrate'))) for j in xrange(len(self.dmag))]
-                for j in xrange(len(self.dmag)):
-                    self.pc[j,i] = jobs[j]()
-            job_server.destroy()
+        if pconst and Rconst:
+            ranges = (rmin, rmax)
+            if ppLoad:
+                for i in xrange(len(self.s)):
+                    print 'Progress: %r / %r' % (i+1, len(self.s))
+                    if self.s[i] == 0.:
+                        self.pc[:,i] = np.zeros((len(self.dmag),))
+                    else:
+                        jobs = [(job_server.submit(onef_dmagsz, (zmin, self.dmag[j], self.s[i], val, pdfs, ranges, funcs, x), (Jac,), ('FuncComp.Functional', 'numpy as np'))) for j in xrange(len(self.dmag))]
+                        for j in xrange(len(self.dmag)):
+                            self.pc[j,i] = jobs[j]()
+                job_server.destroy()
+            else:
+                for i in xrange(len(self.s)):
+                    print 'Progress: %r / %r' % (i+1, len(self.s))
+                    if self.s[i] == 0.:
+                        self.pc[:,i] = np.zeros((len(self.dmag),))
+                    else:
+                        for j in xrange(len(self.dmag)):
+                            self.pc[j,i] = onef_dmagsz(zmin, self.dmag[j], self.s[i], val, pdfs, ranges, funcs, x)
         else:
-            for i in xrange(len(self.s)):
-                print 'Progress: %r / %r' % (i+1, len(self.s))
-                if self.s[i] == 0.:
-                    self.pc[:,i] = np.zeros((len(self.dmag),))
-                else:
-                    for j in xrange(len(self.dmag)):
-                        self.pc[j,i] = onef_dmags(self.dmag[j],self.s[i],ranges,val,pdfs,funcs,x)
+            ranges = (pmin, pmax, Rmin, Rmax, rmin, rmax, zmin, zmax)
+            if ppLoad:
+                for i in xrange(len(self.s)):
+                    print 'Progress: %r / %r' % (i+1, len(self.s))
+                    if self.s[i] == 0.:
+                        self.pc[:,i] = np.zeros((len(self.dmag),))
+                    else:
+                        jobs = [(job_server.submit(onef_dmags, (self.dmag[j], self.s[i], ranges, val, pdfs, funcs, x), (onef_dmagsz, Jac, util.mindmag, util.maxdmag), ('FuncComp.Functional', 'FuncComp.util as util', 'numpy as np', 'scipy.integrate as integrate'))) for j in xrange(len(self.dmag))]
+                        for j in xrange(len(self.dmag)):
+                            self.pc[j,i] = jobs[j]()
+                job_server.destroy()
+            else:
+                for i in xrange(len(self.s)):
+                    print 'Progress: %r / %r' % (i+1, len(self.s))
+                    if self.s[i] == 0.:
+                        self.pc[:,i] = np.zeros((len(self.dmag),))
+                    else:
+                        for j in xrange(len(self.dmag)):
+                            self.pc[j,i] = onef_dmags(self.dmag[j],self.s[i],ranges,val,pdfs,funcs,x)
         # interpolant for joint pdf of s, dmag
         self.grid = interpolate.RectBivariateSpline(self.s, self.dmag, self.pc.T,kx=3,ky=3)
         # vectorized interpolant for joint pdf of s, dmag
@@ -244,6 +258,96 @@ class Functional(object):
         f = np.vectorize(self.grid.integral)
                 
         return f(smin, smax, dmagmin, dmagmax)
+    
+class f_zeta(object):
+    """Determines the probability density function for zeta = p*R^2 and
+    stores as instance method
+        
+    Args:
+        ranges (tuple):
+            pmin (float): minimum geometric albedo
+            pmax (float): maximum geometric albedo
+            Rmin (float): minimum planetary radius (km)
+            Rmax (float): maximum planetary radius (km)
+        pdfs (tuple):
+            f_p (callable(p)): probability density function for albedo
+            f_R (callable(R)): probability density function for planetary radius
+        n (int):
+            Number of points in zeta
+                
+    Attributes:
+        pmin (float):
+            Minimum value of geometric albedo
+        pmax (float):
+            Maximum value of geometric albedo
+        Rmin (float):
+            Minimum value of planetary radius (km)
+        Rmax (float):
+            Maximum value of planetary radius (km)
+        f_p (callable(p)):
+            Probability density function for albedo
+        f_R (callable(R)):
+            Probability density function for radius
+        f_z (callable(z)):
+            Probability density function for zeta = p*R^2
+        """
+        
+    def __init__(self, ranges, pdfs, n):
+        self.pmin, self.pmax, self.Rmin, self.Rmax = ranges
+        self.f_p, self.f_R = pdfs
+        pconst = self.pmin == self.pmax
+        Rconst = self.Rmin == self.Rmax
+        if not pconst and not Rconst:
+            pdfs = (self.f_p, self.f_R)
+            ranges = (self.pmin, self.pmax, self.Rmin, self.Rmax)
+            z = np.linspace(self.pmin*self.Rmin**2, self.pmax*self.Rmax**2, num=n)
+            pdfz = np.array([])
+            if ppLoad:
+                # set up job server for parallel computations
+                ppservers = ()
+                if len(sys.argv) > 1:
+                    ncpus = int(sys.argv[1])
+                    # Creates jobserver with ncpus workers
+                    job_server = pp.Server(ncpus, ppservers=ppservers)
+                else:
+                    job_server = pp.Server(ppservers=ppservers)
+                jobs = [(job_server.submit(onef_zeta, (zetai, pdfs, ranges), (onef_R2,), ('FuncComp.Functional', 'numpy as np'))) for zetai in z]
+                for job in jobs:
+                    pdfz = np.hstack((pdfz, job()))
+                job_server.destroy()
+            else:
+                for zetai in z:
+                    temp = onef_zeta(zetai, pdfs, ranges)
+                    pdfz = np.append(pdfz,temp)
+            # pdf of zeta = p*R^2
+            self.f_z = interpolate.InterpolatedUnivariateSpline(z, pdfz, k=3, ext=1)
+            
+    def pRconst(self,zi):
+        """If geometric albedo and planetary radius are constant, this method 
+        returns 1.
+        
+        """
+        return 1.
+        
+    def pconst(self, zi):
+        """If geometric albedo is constant, this gives the probability density
+        function of z = p*R^2
+        
+        """
+        
+        f = 1./(2.*np.sqrt(self.pmin*zi))*self.f_R(np.sqrt(zi/self.pmin))
+        
+        return f
+    
+    def Rconst(self, zi):
+        """If planetary radius is constant, this give the probability density
+        function of z = p*R^2
+        
+        """
+        
+        f = 1./self.Rmin**2*self.f_p(zi/self.Rmin**2)
+        
+        return f
         
 def Jac(b):
     """Returns the determinant of the Jacobian matrix
@@ -287,10 +391,10 @@ def onef_zeta(zetai, pdfs, ranges):
             
     f_p, f_R = pdfs
     pmin, pmax, Rmin, Rmax = ranges
-    # Boole's rule
     # number of sample points
     nump = 1001
     p = np.linspace(pmin, pmax, nump)
+    # weights
     z = 7.*np.ones((nump,))
     z[1::2] = 32.
     z[2::4] = 12.
@@ -347,7 +451,6 @@ def onef_r(ri, pdfs, ranges):
             
     """
             
-    # Simpson's rule
     amin, amax, emin, emax = ranges
     if (ri == amin*(1.-emax)) or (ri == amax*(1.+emax)):
         f = 0.
