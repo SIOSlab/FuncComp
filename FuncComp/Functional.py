@@ -137,7 +137,7 @@ class Functional(object):
                     pdfr = np.append(pdfr, temp)
         elif aconst:
             if ppLoad:
-                jobs = [(job_server.submit(onef_r_aconst, (ri, amin, pop.erange, f_e), (), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
+                jobs = [(job_server.submit(onef_r_aconst, (ri, amin, pop.erange, f_e), (grandac,), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
                 for job in jobs:
                     pdfr = np.hstack((pdfr, job()))
             else:                
@@ -146,7 +146,7 @@ class Functional(object):
                     pdfr = np.append(pdfr, temp)
         elif econst:
             if ppLoad:
-                jobs = [(job_server.submit(onef_r_econst, (ri, emin, pop.arange.to('AU').value, f_a), (), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
+                jobs = [(job_server.submit(onef_r_econst, (ri, emin, pop.arange.to('AU').value, f_a), (grandec,), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
                 for job in jobs:
                     pdfr = np.hstack((pdfr, job()))
             else:
@@ -542,17 +542,26 @@ def onef_r_aconst(r, a, e, f_e):
     
     """
     
-    emin = np.abs(1.0 - r/a) 
-    if emin > e.max():
+    etest1 = 1.0 - r/a
+    etest2 = r/a - 1.0
+    if e.max() < etest1:
+        f = 0.0
+    elif (r == a*(1.0+e.max())) or (r == a*(1.0-e.max())):
         f = 0.0
     else:
-        if emin < e.min():
-            low = e.min()
+        if r < a:
+            if e.min() > etest1:
+                low = e.min()
+            else:
+                low = etest1
         else:
-            low = emin
+            if e.min() > etest2:
+                low = e.min()
+            else:
+                low = etest2
                 
         f = integrate.fixed_quad(grandac, low, e.max(), args=(a,r,f_e), n=200)[0]
-        
+
     return f
     
 def grandac(e, a, r, f_e):
@@ -599,19 +608,21 @@ def onef_r_econst(r, e, a, f_a):
             Probability density of orbital radius
     
     """
-    
-    a1 = r/(1.0-e)
-    a2 = r/(1.0+e)
-    if a.max() < a1:
-        high = a.max()
+    if (r <= a.min()*(1.0-e)) or (r >= a.max()*(1.0+e)):
+        f = 0.0
     else:
-        high = a1
-    if a.min() < a2:
-        low = a2
-    else:
-        low = a.min()
+        a1 = r/(1.0-e)
+        a2 = r/(1.0+e)
+        if a.max() < a1:
+            high = a.max()
+        else:
+            high = a1
+        if a.min() < a2:
+            low = a2
+        else:
+            low = a.min()
         
-    f = integrate.fixed_quad(grandec, low, high, args=(e,r,f_a), n=200)[0]
+        f = integrate.fixed_quad(grandec, low, high, args=(e,r,f_a), n=200)[0]
     
     return f
     
