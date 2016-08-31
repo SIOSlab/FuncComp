@@ -515,9 +515,7 @@ def onef_r_aeconst(r, a, e, f_a):
     
     """
     
-    if e == 0.0:
-        f = f_a(r)
-    elif r > a*(1.0-e):
+    if (r > a*(1.0-e)) & (r < a*(1.0+e)):
         f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))
     else:
         f = 0.0
@@ -677,9 +675,13 @@ def onef_dmags(dmag, s, ranges, val, pdfs, funcs, x):
     pmin, pmax, Rmin, Rmax, rmin, rmax, zmin, zmax = ranges
     minrange = (pmax, Rmax, rmin, rmax)
     maxrange = (pmin, Rmin, rmax)
-    
+    pconst = pmin == pmax
+    Rconst = Rmin == Rmax
     if (dmag < util.mindmag(s, minrange, x)) or (dmag > util.maxdmag(s, maxrange, x)):
         f = 0.0
+    elif (pconst & Rconst):
+        ranges2 = (rmin, rmax)
+        f = onef_dmagsz(pmin*Rmin**2, dmag, s, val, pdfs, ranges2, funcs, x)
     else:
         ztest = (s/x)**2*10.0**(-0.4*dmag)/val
         ranges2 = (rmin, rmax)
