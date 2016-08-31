@@ -27,7 +27,7 @@ def simpSample(f, numTest, xMin, xMax, M = None, verb = False):
     numIter = 0;
     maxIter = 1000;
 
-    nSamp = np.max([2*numTest,1e6])
+    nSamp = int(np.max([2*numTest,1e6]))
     while n < numTest and numIter < maxIter:
         xd = np.random.random(nSamp) * (xMax - xMin) + xMin
         yd = np.random.random(nSamp) * M

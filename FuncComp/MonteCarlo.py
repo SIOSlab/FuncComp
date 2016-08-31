@@ -111,20 +111,20 @@ class MonteCarlo(object):
             else:
                 job_server = pp.Server(ppservers=ppservers)
         if steps <= 1.:
-            nplan = Nplanets
-            print 'Samples: %r / %r' % (int(nplan),int(Nplanets))
+            nplan = int(Nplanets)
+            print 'Samples: %r / %r' % (nplan,int(Nplanets))
             hc, dmagedges, sedges = oneMCsim(nplan, pdfs, ranges, binh, x)
             Hc += hc
         else:
             samples = 0
             while Nplanets-samples > 0.:
                 if Nplanets-samples > 1e6:
-                    nplan = 1e6
+                    nplan = int(1e6)
                     if ppLoad:
-                        if int((Nplanets-samples)/nplan) > 100:
+                        if int((Nplanets-samples)/float(nplan)) > 100:
                             psteps = 100
                         else:
-                            psteps = int((Nplanets-samples)/nplan)
+                            psteps = int((Nplanets-samples)/float(nplan))
                         jobs = [(job_server.submit(oneMCsim, (nplan, pdfs, ranges, binh, x), (), ('FuncComp.MonteCarlo', 'numpy as np', 'FuncComp.statsFun as statsFun'))) for step in xrange(psteps)]
                         for job in jobs:
                             hc, dmagedges, sedges = job()
@@ -151,30 +151,9 @@ class MonteCarlo(object):
         # interpolant for joint pdf of s, dmag
         self.grid = interpolate.RectBivariateSpline(self.s,self.dmag,self.Hc.T,kx=3,ky=3)
         # vectorized interpolant for joint pdf of s, dmag
-        self.pdf = np.vectorize(self.grid)
-        
-    def comp(self, smin, smax, dmagmin, dmagmax):
-        """Returns completeness value
-        
-        Args:
-            smin (float or ndarray):
-                Minimum planet-star separation
-            smax (float or ndarray):
-                Maximum planet-star separation
-            dmagmin (float or ndarray):
-                Minimum difference in brightness magnitude
-            dmagmax (float or ndarray):
-                Maximum difference in brightness magnitude
-        
-        Returns:
-            f (ndarray):
-                Array of completeness values
-        
-        """
-        
-        f = np.vectorize(self.grid.integral)
-        
-        return f(smin, smax, dmagmin, dmagmax)
+        self.pdf = self.grid.ev
+        # vectorized method to calculate completeness comp(smin,smax,dmagmin,dmagmax)
+        self.comp = np.vectorize(self.grid.integral)
         
 def oneMCsim(nplan, pdfs, ranges, binh, x):
     """Performs Monte Carlo trial

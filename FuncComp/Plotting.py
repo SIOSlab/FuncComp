@@ -23,7 +23,7 @@ ns = 400
 # number of points in dmag for functional approach
 ndmag = 400
 # number of sample planets for Monte Carlo trials
-Nplanets = 1e9
+Nplanets = int(1e9)
 # number of bins in s for Monte Carlo histograms
 bins = 400
 # number of bins in dmag for Monte Carlo histograms

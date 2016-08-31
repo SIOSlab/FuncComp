@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Updated on June 8, 2016
+Updated on August 30, 2016
 author: Daniel Garrett (dg622@cornell.edu)
 """
 
@@ -76,8 +76,8 @@ class Functional(object):
         amax = pop.arange.max().value
         emin = pop.erange.min()
         emax = pop.erange.max()
-        rmin = pop.arange.min().value*(1. - pop.erange.max())
-        rmax = pop.arange.max().value*(1. + pop.erange.max())
+        rmin = pop.arange.min().value*(1.0 - pop.erange.max())
+        rmax = pop.arange.max().value*(1.0 + pop.erange.max())
         Rmax = pop.Rrange.max().value
         Rmin = pop.Rrange.min().value
         pmax = pop.prange.max()
@@ -108,7 +108,7 @@ class Functional(object):
         # linearly spaced array for range values
         r = np.linspace(rmin, rmax, num=n)
         # inverse 1 (<bstar) of sin(b)^2*Phi(b)
-        b1 = np.linspace(0., bstar, num=50*n)
+        b1 = np.linspace(0.0, bstar, num=50*n)
         binv1 = interpolate.InterpolatedUnivariateSpline(np.sin(b1)**2*PhiL(b1), b1, k=3, ext=1)
         # inverse 2 (>bstar) of sin(b)^2*Phi(b)
         b2 = np.linspace(bstar, np.pi, num=50*n)
@@ -128,12 +128,12 @@ class Functional(object):
         pdfr = np.array([])
         if aconst and econst:
             if ppLoad:
-                jobs = [(job_server.submit(onef_r_aeconst, (ri, amin, emin), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
+                jobs = [(job_server.submit(onef_r_aeconst, (ri, amin, emin, f_a), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
                 for job in jobs:
                     pdfr = np.hstack((pdfr, job()))
             else:
                 for ri in r:
-                    temp = onef_r_aeconst(ri, amin, emin)
+                    temp = onef_r_aeconst(ri, amin, emin, f_a)
                     pdfr = np.append(pdfr, temp)
         elif aconst:
             if ppLoad:
@@ -157,7 +157,7 @@ class Functional(object):
             pdfs = (f_e, f_a)
             ranges = (amin, amax, emin, emax)
             if ppLoad:
-                jobs = [(job_server.submit(onef_r, (ri, pdfs, ranges), (), ('FuncComp.Functional', 'numpy as np'))) for ri in r]
+                jobs = [(job_server.submit(onef_r, (ri, pdfs, ranges), (grand2,grand1), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for ri in r]
                 for job in jobs:
                     pdfr = np.hstack((pdfr, job()))            
             else:
@@ -234,30 +234,9 @@ class Functional(object):
         # interpolant for joint pdf of s, dmag
         self.grid = interpolate.RectBivariateSpline(self.s, self.dmag, self.pc.T,kx=3,ky=3)
         # vectorized interpolant for joint pdf of s, dmag
-        self.pdf = np.vectorize(self.grid)
-        
-    def comp(self, smin, smax, dmagmin, dmagmax):
-        """Returns completeness value
-        
-        Args:
-            smin (float or ndarray):
-                Minimum planet-star separation
-            smax (float or ndarray):
-                Maximum planet-star separation
-            dmagmin (float or ndarray):
-                Minimum difference in brightness magnitude
-            dmagmax (float or ndarray):
-                Maximum difference in brightness magnitude
-        
-        Returns:
-            f (ndarray):
-                Array of completeness values
-        
-        """
-        
-        f = np.vectorize(self.grid.integral)
-                
-        return f(smin, smax, dmagmin, dmagmax)
+        self.pdf = self.grid.ev
+        # vectorized method to calculate completeness comp(smin,smax,dmagmin,dmagmax)
+        self.comp = np.vectorize(self.grid.integral)
     
 class f_zeta(object):
     """Determines the probability density function for zeta = p*R^2 and
@@ -311,7 +290,7 @@ class f_zeta(object):
                     job_server = pp.Server(ncpus, ppservers=ppservers)
                 else:
                     job_server = pp.Server(ppservers=ppservers)
-                jobs = [(job_server.submit(onef_zeta, (zetai, pdfs, ranges), (onef_R2,), ('FuncComp.Functional', 'numpy as np'))) for zetai in z]
+                jobs = [(job_server.submit(onef_zeta, (zetai, pdfs, ranges), (pgrand,), ('FuncComp.Functional', 'numpy as np', 'scipy.integrate as integrate'))) for zetai in z]
                 for job in jobs:
                     pdfz = np.hstack((pdfz, job()))
                 job_server.destroy()
@@ -327,7 +306,7 @@ class f_zeta(object):
         returns 1.
         
         """
-        return 1.
+        return 1.0
         
     def pconst(self, zi):
         """If geometric albedo is constant, this gives the probability density
@@ -335,7 +314,7 @@ class f_zeta(object):
         
         """
         
-        f = 1./(2.*np.sqrt(self.pmin*zi))*self.f_R(np.sqrt(zi/self.pmin))
+        f = 1.0/(2.0*np.sqrt(self.pmin*zi))*self.f_R(np.sqrt(zi/self.pmin))
         
         return f
     
@@ -345,7 +324,7 @@ class f_zeta(object):
         
         """
         
-        f = 1./self.Rmin**2*self.f_p(zi/self.Rmin**2)
+        f = 1.0/self.Rmin**2*self.f_p(zi/self.Rmin**2)
         
         return f
         
@@ -362,10 +341,10 @@ def Jac(b):
             
     """
             
-    PhiL = lambda beta: (1./np.pi)*(np.sin(beta) + (np.pi-beta)*np.cos(beta))
+    PhiL = lambda beta: (1.0/np.pi)*(np.sin(beta) + (np.pi-beta)*np.cos(beta))
     # derivative of PhiL with respect to beta
-    PhiLp = lambda beta: (1./np.pi)*(beta-np.pi)*np.sin(beta)
-    J = -2.5/(PhiL(b)*np.log(10.))*PhiLp(b)*np.sin(b) - 5./np.log(10.)*np.cos(b)
+    PhiLp = lambda beta: (1.0/np.pi)*(beta-np.pi)*np.sin(beta)
+    J = -2.5/(PhiL(b)*np.log(10.0))*PhiLp(b)*np.sin(b) - 5.0/np.log(10.0)*np.cos(b)
     
     return J
 
@@ -391,46 +370,37 @@ def onef_zeta(zetai, pdfs, ranges):
             
     f_p, f_R = pdfs
     pmin, pmax, Rmin, Rmax = ranges
-    # number of sample points
-    nump = 1001
-    p = np.linspace(pmin, pmax, nump)
-    # weights
-    z = 7.*np.ones((nump,))
-    z[1::2] = 32.
-    z[2::4] = 12.
-    z[4::4] = 14.
-    z[-1] = 7.
-    z[0] = 1.
-    z[-1] = 1.
-    pstep = p[1] - p[0]
-    z = 2.*pstep/45.*z
-    grand = np.zeros((nump,))
-    arg = zetai/p
-    good = np.where((arg >= Rmin**2) & (arg <= Rmax**2))[0]   
-    grand[good] = (1./p[good])*onef_R2(arg[good], f_R)*f_p(p[good])
-    f = np.dot(z,grand)
+    p1 = zetai/Rmax**2
+    p2 = zetai/Rmin**2
+    if p1 < pmin:
+        p1 = pmin
+    if p2 > pmax:
+        p2 = pmax
+    
+    f = integrate.fixed_quad(pgrand,p1,p2,args=(zetai,f_p,f_R),n=200)[0]
 
     return f
-   
-def onef_R2(R2, pdf):
-    """Returns probability density of planetary radius squared (R^2)
+    
+def pgrand(p, z, f_p, f_R):
+    """Integrand for determining probability density of zeta
     
     Args:
-        R2 (float):
-            Value of planetary radius squared
-        pdf (callable(R)):
-            Probability density function of planetary radius
+        p (float):
+            Value of geometric albedo
+        z (float):
+            Value of zeta, p*R**2
+        f_p (callable(p)):
+            Probability density function for geometric albedo
+        f_R (callable(R)):
+            Probability density function for planetary radius
     
     Returns:
         f (float):
-            Probability density of planetary radius squared
-            
-    """
-            
-    f = 1./(2.*np.sqrt(R2))*pdf(np.sqrt(R2))
+            Integrand
     
-    return f
-
+    """
+    return 1.0/(2.0*np.sqrt(z*p))*f_R(np.sqrt(z/p))*f_p(p)
+   
 def onef_r(ri, pdfs, ranges):
     """Returns probability density of orbital radius r
     
@@ -452,42 +422,80 @@ def onef_r(ri, pdfs, ranges):
     """
             
     amin, amax, emin, emax = ranges
-    if (ri == amin*(1.-emax)) or (ri == amax*(1.+emax)):
-        f = 0.
+    if (ri == amin*(1.0 - emax)) or (ri == amax*(1.0 + emax)):
+        f = 0.0
     else:
         f_e, f_a = pdfs
-        # must be odd
-        na = 501
-        ne = 9999
-        a = np.linspace(amin, amax, na)
-        z = 2.*np.ones((len(a),))
-        z[::2] = 4.
-        z[0] = 1.
-        z[-1] = 1.
-        astep = a[1] - a[0]
-        z = astep/3.*z
-        grand = np.zeros(np.shape(a))
-        yi = 2.*np.ones((ne,))
-        yi[::2] = 4.
-        yi[0] = 1.
-        yi[-1] = 1.
-        for i in xrange(len(a)):
-            emin1 = np.abs(1. - ri/a[i])
-            if emin1 < emin:
-                emin1 = emin
-            if emin1 > emax:
-                granda = 0.
-            else:
-                inte = lambda e: (1./np.pi)*ri/(a[i]*np.sqrt((a[i]*e)**2 - (a[i] - ri)**2))*f_e(e)*f_a(a[i])
-                e = np.linspace(emin1+1.e-6,emax,ne)
-                estep = e[1]-e[0]
-                granda = np.dot(estep/3.*yi,inte(e))           
-            grand[i] = granda
-        f = np.dot(z,grand)
+        grand2v = np.vectorize(grand2)
+        a1 = ri/(1.0+emax)
+        a2 = ri/(1.0-emax)
+        if a1 < amin:
+            a1 = amin
+        if a2 > amax:
+            a2 = amax
+
+        f = integrate.fixed_quad(grand2v, a1, a2, args=(ri,emin,emax,f_e,f_a), n=200)[0]
     
     return f
     
-def onef_r_aeconst(r, a, e):
+def grand1(e, a, r, f_e, f_a):
+    """Returns first integrand for determining probability density of orbital
+    radius
+    
+    Args:
+        e (float):
+            Value of eccentricity
+        a (float):
+            Value of semi-major axis (AU)
+        r (float):
+            Value of orbital radius (AU)
+        f_e (callable(e)):
+            Probability density function for eccentricity
+        f_a (callable(a)):
+            Probability density function for semi-major axis
+            
+    Returns:
+        f (float):
+            Integrand
+    
+    """
+    
+    f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))*f_e(e)*f_a(a)
+    
+    return f
+    
+def grand2(a, r, emin, emax, f_e, f_a):
+    """Returns second integrand for determining probability density of orbital
+    radius
+    
+    Args:
+        a (float):
+            Value of semi-major axis (AU)
+        r (float):
+            Value of orbital radius (AU)
+        emin (float):
+            Minimum eccentricity
+        emax (float):
+            Maximum eccentricity
+        f_e (callable(e)):
+            Probability density function for eccentricity
+        f_a (callable(a)):
+            Probability density function for semi-major axis
+    
+    """
+    
+    emin1 = np.abs(1.0 - r/a)
+    if emin1 < emin:
+        emin1 = emin
+    
+    if emin1 > emax:
+        f = 0.0
+    else:
+        f = integrate.fixed_quad(grand1, emin1, emax, args=(a,r,f_e,f_a), n=100)[0]
+
+    return f
+    
+def onef_r_aeconst(r, a, e, f_a):
     """Returns probability density of orbital radius r for constant semi-major
     axis and eccentricity
     
@@ -498,6 +506,8 @@ def onef_r_aeconst(r, a, e):
             Value of semi-major axis (AU)
         e (float):
             Value of eccentricity
+        f_a (callable(a)):
+            Probability density function for semi-major axis
             
     Returns:
         f (float):
@@ -505,10 +515,12 @@ def onef_r_aeconst(r, a, e):
     
     """
     
-    if ((a*e)**2 - (a - r)**2) <= 0:
-        f = 0.
-    else:
+    if e == 0.0:
+        f = f_a(r)
+    elif r > a*(1.0-e):
         f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))
+    else:
+        f = 0.0
         
     return f
     
@@ -532,13 +544,42 @@ def onef_r_aconst(r, a, e, f_e):
     
     """
     
-    emin = np.abs(1. - r/a) + 1e-6
+    emin = np.abs(1.0 - r/a) 
     if emin > e.max():
-        f = 0.
+        f = 0.0
     else:
-        grand = lambda ei: r/(np.pi*a*np.sqrt((a*ei)**2 - (a-r)**2))*f_e(ei)
-        f = integrate.quad(grand, emin, e.max(), limit=100)[0]
+        if emin < e.min():
+            low = e.min()
+        else:
+            low = emin
+                
+        f = integrate.fixed_quad(grandac, low, e.max(), args=(a,r,f_e), n=200)[0]
         
+    return f
+    
+def grandac(e, a, r, f_e):
+    """Returns integrand for probability density of orbital radius where
+    semi-major axis is a constant
+    
+    Args:
+        e (float):
+            Value of eccentricity
+        a (float):
+            Value of semi-major axis (AU)
+        r (float):
+            Value of orbital radius (AU)
+        f_e (callable(e)):
+            Probability density function for eccentricity
+            
+    Returns:
+        f (float):
+            Integrand for probability density of orbital radius where 
+            semi-major axis is a constant
+        
+        """
+    
+    f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))*f_e(e)
+    
     return f
     
 def onef_r_econst(r, e, a, f_a):
@@ -561,18 +602,44 @@ def onef_r_econst(r, e, a, f_a):
     
     """
     
-    if (r == a.min()*(1.-e)) or (r == a.max()*(1.+e)):
-        f = 0.
+    a1 = r/(1.0-e)
+    a2 = r/(1.0+e)
+    if a.max() < a1:
+        high = a.max()
     else:
-        amax = r/(1.-e)
-        amin = r/(1.+e)
-        if amax > a.max():
-            amax = a.max()
-        if amin < a.min():
-            amin = a.min()
-        grand = lambda ai: r/(np.pi*ai*np.sqrt((ai*e)**2 - (ai-r)**2))*f_a(ai)
-        f = integrate.quad(grand, amin, amax, limit=500)[0]
+        high = a1
+    if a.min() < a2:
+        low = a2
+    else:
+        low = a.min()
         
+    f = integrate.fixed_quad(grandec, low, high, args=(e,r,f_a), n=200)[0]
+    
+    return f
+    
+def grandec(a, e, r, f_a):
+    """Returns integrand for probability density of orbital radius where
+    eccentricity is a constant
+    
+    Args:
+        a (float):
+            Value of semi-major axis (AU)
+        e (float):
+            Value of eccentricity
+        r (float):
+            Value of orbital radius (AU)
+        f_a (callable(a)):
+            Probability density function for semi-major axis
+            
+    Returns:
+        f (float):
+            Integrand for probability density of orbital radius where 
+            eccentricity is a constant
+    
+    """
+    
+    f = r/(np.pi*a*np.sqrt((a*e)**2-(a-r)**2))*f_a(a)
+    
     return f
     
 def onef_dmags(dmag, s, ranges, val, pdfs, funcs, x):
@@ -612,17 +679,17 @@ def onef_dmags(dmag, s, ranges, val, pdfs, funcs, x):
     maxrange = (pmin, Rmin, rmax)
     
     if (dmag < util.mindmag(s, minrange, x)) or (dmag > util.maxdmag(s, maxrange, x)):
-        f = 0.
+        f = 0.0
     else:
-        ztest = (s/x)**2*10.**(-0.4*dmag)/val
+        ztest = (s/x)**2*10.0**(-0.4*dmag)/val
         ranges2 = (rmin, rmax)
         if ztest >= zmax:
-            f = 0.
+            f = 0.0
         else:
             if ztest < zmin:
-                f = integrate.quad(onef_dmagsz, zmin, zmax, args=(dmag, s, val, pdfs, ranges2, funcs, x), full_output=1, limit=5000)[0]
+                f = integrate.fixed_quad(onef_dmagsz, zmin, zmax, args=(dmag, s, val, pdfs, ranges2, funcs, x), n=61)[0]
             else:
-                f = integrate.quad(onef_dmagsz, ztest, zmax, args=(dmag, s, val, pdfs, ranges2, funcs, x), full_output=1, limit=5000)[0]
+                f = integrate.fixed_quad(onef_dmagsz, ztest, zmax, args=(dmag, s, val, pdfs, ranges2, funcs, x), n=61)[0]
             
     return f            
 
@@ -652,10 +719,10 @@ def onef_dmagsz(z, dmag, s, val, pdfs, ranges, funcs, x):
     f_z, f_r = pdfs
     rmin, rmax = ranges
     binv1, binv2 = funcs
-    f_b = lambda b: np.sin(b)/2.
-    vals = (s/x)**2*10.**(-0.4*dmag)/z
+    f_b = lambda b: np.sin(b)/2.0
+    vals = (s/x)**2*10.0**(-0.4*dmag)/z
     if type(z) == np.ndarray:
-        f = np.zeros(np.shape(z))
+        f = np.zeros(z.shape)
         if vals.max() > val:
             b1 = binv1(vals[vals<val])
             b2 = binv2(vals[vals<val])
@@ -672,18 +739,18 @@ def onef_dmagsz(z, dmag, s, val, pdfs, ranges, funcs, x):
             f += f_z(z)*f_b(b2)*f_r(r2)/np.abs(Jac(b2))
     else:
         if vals >= val:
-            f = 0.
+            f = 0.0
         else:
             b1 = binv1(vals)
             b2 = binv2(vals)
             r1 = s/np.sin(b1)
             r2 = s/np.sin(b2)
             if r1 < rmin or r1 > rmax:
-                f1 = 0.
+                f1 = 0.0
             else:
                 f1 = f_z(z)*f_b(b1)*f_r(r1)/np.abs(Jac(b1))
             if r2 < rmin or r2 > rmax:
-                f2 = 0.
+                f2 = 0.0
             else:
                 f2 = f_z(z)*f_b(b2)*f_r(r2)/np.abs(Jac(b2))
             f = f1 + f2
